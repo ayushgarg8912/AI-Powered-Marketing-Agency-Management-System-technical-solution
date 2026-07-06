@@ -1,39 +1,34 @@
-# AI-Powered-Marketing-Agency-Management-System-technical-solution
+# AI-Powered Marketing Agency Management System — Technical Solution
 
 This document presents a comprehensive technical solution for a marketing agency management system designed to handle 100+ clients with scalability to 1,000+. The architecture leverages modern cloud technologies, AI integration, and robust security practices to create an efficient, scalable platform.
 
-# Recommended Spring Boot Stack
+---
 
-Spring Boot 3.x (with Java 17+)
+## Recommended Spring Boot Stack
 
-Spring Data JPA + PostgreSQL/MYSQL
+- Spring Boot 3.x (Java 17+)
+- Spring Data JPA + PostgreSQL / MySQL
+- Spring Security + OAuth2 Resource Server
+- Spring Cache + Redis
+- Spring Cloud (Feign, Circuit Breaker, Config Server) — for microservices phase
+- Spring Batch — heavy data processing
+- Spring AI — LLM integrations
+- Liquibase — DB migrations
+- MapStruct — DTO mapping
+- Lombok — boilerplate reduction
+- Micrometer + Prometheus + Grafana — monitoring
 
-Spring Security + OAuth2 Resource Server
+---
 
-Spring Cache + Redis
+## 1. System Architecture Diagram
 
-Spring Cloud (if microservices – Feign, Circuit Breaker, Config Server)
+<img width="7008" height="3032" alt="architecture-diagram" src="https://github.com/user-attachments/assets/e93c363e-4a4f-4c95-b9e0-610bfd456766" />
 
-Spring Batch for heavy data processing
+---
 
-Spring AI (for LLM integrations)
+## 2. Database Design
 
-Liquibase for DB migrations
-
-MapStruct for DTO mapping
-
-Lombok for boilerplate reduction
-
-Micrometer + Prometheus + Grafana for monitoring
-
-# 1. System Architecture Diagram
-
-<img width="7008" height="3032" alt="deepseek_mermaid_20260705_79c570" src="https://github.com/user-attachments/assets/e93c363e-4a4f-4c95-b9e0-610bfd456766" />
-
-
-
-# 2. Database Design
-
+> **Note:** Schema updated to include columns required by the reporting/dashboard queries in Section 3 (`campaign_name`, `end_date`, `impressions`, `clicks`, `conversions` on `CAMPAIGNS`; `contract_start` on `CLIENTS`). This keeps the ER model consistent with every query below.
 
 ```mermaid
 erDiagram
@@ -45,6 +40,7 @@ erDiagram
         string email
         string phone
         decimal monthly_fee
+        date contract_start
         string status
     }
 
@@ -102,9 +98,15 @@ erDiagram
     CAMPAIGNS {
         bigint campaign_id PK
         bigint project_id FK
+        string campaign_name
         string platform
         decimal budget
         decimal spend
+        bigint impressions
+        bigint clicks
+        bigint conversions
+        date start_date
+        date end_date
         string status
     }
 
@@ -184,443 +186,385 @@ erDiagram
     TEAM_MEMBERS ||--o{ AUDIT_LOGS : creates
 ```
 
-# SQL queries with explanations
-# 1. Pending Meta Access Requests
-
-SELECT              <br>            
-    ar.request_id,  <br>         
-    c.company_name,<br>         
-    ar.asset_type,<br>         
-    ar.request_date,<br>         
-    ar.status<br>         
-FROM AccessRequests ar<br>         
-JOIN Clients c<br>         
-    ON ar.client_id = c.client_id<br>         
-WHERE ar.asset_type = 'META'<br>         
-  AND ar.status = 'PENDING'<br>         
-ORDER BY ar.request_date ASC;<br>         
-
-Explanation
-<br>         
-Retrieves all pending Meta Business access requests.<br>         
-Joins the Clients table to display the client name.<br>         
-Oldest requests appear first so the team can prioritize them.<br>         
-
-# 2. Overdue Campaigns
-
-SELECT<br>   
-    campaign_id,<br>   
-    campaign_name,<br>   
-    end_date,<br>   
-    status<br>   
-FROM Campaigns<br>   
-WHERE end_date < CURRENT_DATE<br>   
-AND status <> 'COMPLETED';<br>   
-
-Explanation <br>
-Finds campaigns whose end date has already passed. <br>
-Ignores completed campaigns.<br>
-Useful for dashboard alerts.<br>
-
-# 3. Team Workload
-
-SELECT <br>
-    tm.team_member_id,<br>
-    tm.full_name,<br>
-    COUNT(t.task_id) AS total_tasks<br>
-FROM TeamMembers tm<br>
-LEFT JOIN Tasks t<br>
-ON tm.team_member_id = t.assigned_to<br>
-AND t.status <> 'COMPLETED'<br>
-GROUP BY tm.team_member_id, tm.full_name<br>
-ORDER BY total_tasks DESC;<br>
-
-Explanation <br>
-Counts active tasks for each employee.<br>
-Helps managers distribute work evenly.<br>
-
-# 4. Clients Missing GA4 or GTM
-
-SELECT   <br>
-    c.client_id,<br>
-    c.company_name<br>
-FROM Clients c<br>
-LEFT JOIN GoogleAssets g<br>
-ON c.client_id = g.client_id<br>
-WHERE g.ga4_property_id IS NULL<br>
-   OR g.gtm_container_id IS NULL;<br>
-
-   Explanation  <br>
-Finds clients who have not completed Google Analytics or Google Tag Manager setup.<br>
-Useful during onboarding.
-<br>
-
-# 5. Monthly Revenue
-
-SELECT   <br>
-    YEAR(contract_start) AS year,<br>
-    MONTH(contract_start) AS month,<br>
-    SUM(monthly_fee) AS total_revenue<br>
-FROM Clients<br>
-WHERE status = 'ACTIVE'<br>
-GROUP BY YEAR(contract_start),<br>
-         MONTH(contract_start)<br>
-ORDER BY year DESC,<br>
-         month DESC;<br>
-
- Explanation  <br>
-Calculates agency revenue based on client retainers.<br>
-Groups revenue by month
-
-# 6. Inactive Clients  
-
-SELECT   <br>
-    client_id,<br>
-    company_name,<br>
-    status<br>
-FROM Clients<br>
-WHERE status = 'INACTIVE';<br>
-
-Explanation  <br>
-Lists all inactive clients.<br>
-Useful for retention campaigns.<br>
-
-# 7. Highest Spend Campaigns
-
-SELECT   <br>
-    campaign_id, <br>
-    campaign_name,<br>
-    platform,<br>
-    spend<br>
-FROM Campaigns<br>
-ORDER BY spend DESC<br>
-LIMIT 10;<br> 
-
-Explanation <br>
-Returns the Top 10 campaigns by advertising spend. <br>
-Helps identify major campaigns.
-
-# 8. Total Campaign Spend per Client
-
-SELECT   <br>
-    c.company_name, <br>
-    SUM(cp.spend) AS total_spend  <br>
-FROM Clients c <br>
-JOIN Projects p <br>
-ON c.client_id = p.client_id <br>
-JOIN Campaigns cp <br>
-ON p.project_id = cp.project_id <br>
-GROUP BY c.company_name <br>
-ORDER BY total_spend DESC; <br>
-
-Explanation <br>
-Calculates total advertising spend for each client.<br>
-Useful for client reports.
-
- # 9. Campaign Performance
-
- SELECT   <br>
-    campaign_name, <br>
-    impressions,<br>
-    clicks,<br>
-    conversions,<br>
-    spend<br>
-FROM Campaigns<br>
-ORDER BY conversions DESC;<br>
-
-Explanation <br>
-Shows campaign performance metrics. <br>
-Can be used for dashboard analytics.<br>
- 
-# 10. Pending Tasks
-
-SELECT  <br>
-    task_id, <br>
-    title,<br>
-    due_date,<br>
-    status<br>
-FROM Tasks<br>
-WHERE status = 'PENDING'<br>
-ORDER BY due_date;<br>
-ExplanationC
-Displays pending tasks ordered by due date.<br>
-Helps marketing executives prioritize work.
-
-
-#  Dashboards
-
-Dashboards are built as React frontends consuming REST APIs from Spring Boot.
-
- # 1.CEO
- KPIs - Total revenue (trend), active client count, client churn, new clients, average revenue per client, team utilisation, top 5 campaigns, client satisfaction score
-
- # 2.Account Manager
- KPIs -  Portfolio size, revenue per client, client health scores, upcoming deliverables, pending approvals, task completion rate, meeting schedule
-
- # 3.Marketing Executive
- KPIs  -  Active campaigns, pending launches, daily spend, CPA trends, top creative performance, A/B test results, optimisation suggestions, daily checklist
- 
-
-
-# API Design
-
-<img width="3850" height="1603" alt="deepseek_mermaid_20260705_7b306f" src="https://github.com/user-attachments/assets/3669e70b-b2a0-4cd7-a09a-158e87746a43" />
-
-# Client Management
-GET /api/v1/clients             <br> 
-GET /api/v1/clients/{id}<br> 
-POST /api/v1/clients<br> 
-PUT /api/v1/clients/{id}<br> 
-DELETE /api/v1/clients/{id}<br> 
-GET /api/v1/clients/{id}/campaigns<br> 
-
-# Campaign Management
-GET /api/v1/campaigns  <br> 
-GET /api/v1/campaigns/{id}<br> 
-POST /api/v1/campaigns<br> 
-PUT /api/v1/campaigns/{id}<br> 
-PATCH /api/v1/campaigns/{id}/status<br> 
-POST /api/v1/campaigns/{id}/launch<br> 
-DELETE /api/v1/campaigns/{id}<br> 
-
-# Asset Management
-GET /api/v1/assets/meta<br> 
-GET /api/v1/assets/google<br> 
-POST /api/v1/assets/meta<br> 
-POST /api/v1/assets/google<br> 
-GET /api/v1/assets/meta/{id}/performance<br> 
-
-# Reporting
-GET /api/v1/reports<br> 
-POST /api/v1/reports/generate<br> 
-GET /api/v1/reports/{id}<br> 
-GET /api/v1/reports/{id}/download<br> 
-GET /api/v1/dashboard/ceo<br> 
-GET /api/v1/dashboard/manager<br> 
-GET /api/v1/dashboard/executive<br> 
-
-# Analytics
-GET /api/v1/analytics/campaign/{id}/metrics<br> 
-GET /api/v1/analytics/roi<br> 
-GET /api/v1/analytics/forecast<br> 
-POST /api/v1/analytics/optimization-suggestions<br> 
-
-# AI Integration
-POST /api/v1/ai/summarize<br> 
-POST /api/v1/ai/generate-report<br> 
-POST /api/v1/ai/optimization<br> 
-POST /api/v1/ai/ad-copy<br> 
-POST /api/v1/ai/analyze-performance<br> 
-
-Authentication & Authorisation: OAuth2 + JWT, with @PreAuthorize on methods.  <br>
-Validation: @Valid with Bean Validation 2.0.  <br>
-Logging: MDC for request tracing; JSON logs to ELK.   <br>
-Rate Limiting: Resilience4j RateLimiter filter backed by Redis. <br>
-Error Handling: Global @ControllerAdvice returning standardised error responses. <br>
-
-# AI Integration
-
-<img width="2611" height="1432" alt="deepseek_mermaid_20260706_a74632" src="https://github.com/user-attachments/assets/7578a415-1cf8-450c-95ac-47b09fd2c23d" />
-
- 
-We leverage Spring AI to unify access to LLMs (OpenAI, Anthropic, Azure) and embedding models. <br>
-
-Use Cases:  <br>
-
-Meeting Summarisation – call ChatClient with a prompt to extract action items and decisions. <br>
-
-Report Generation – combine performance data with natural language insights; prompt includes data as JSON. <br>
-
-Optimisation Recommendations – feed campaign metrics and ask for bid adjustments, audience refinements, etc. <br>
-
-Ad Copy Creation – use PromptTemplate with product/audience variables to generate variations.
-<br>
-Campaign Performance Analysis – detect trends, anomalies, and benchmarks automatically.
-<br>
-All AI calls are asynchronous for long‑running tasks, with retry and fallback strategies.
-<br>
-
-# MCP (Model Context Protocol)
-
-MCP is a protocol that standardises how AI assistants request and receive structured context from external systems. Unlike REST, which is resource‑oriented, MCP is query‑driven and returns data that an LLM can directly consume, often with metadata and tool definitions. 
-
-# MCP vs REST
-
-Aspect	REST API	MCP
-Purpose	CRUD operations, frontend data	Context provisioning for AI models
-Endpoint design	Multiple resources with standard verbs	Single /context endpoint with dynamic intent parsing
-Request format	Path/query parameters + body	Natural language query + optional filters
-Response format	Entity DTOs	Structured context (JSON with LLM‑friendly schema)
-Security	OAuth2 scopes, RBAC	Same, plus client‑scope filtering
-Use cases	UI interactions, integrations	AI agents, RAG, automated insights
-
-# Secure AI Assistant Query Flow (MCP Implementation in Spring)
-
- * AI Assistant (our internal agent or third‑party) sends a POST /mcp/v1/context request with a JWT token and a natural language query. <br>
-
-* MCP Controller validates the JWT using Spring Security OAuth2. <br>
-
-* The IntentParser (powered by a lightweight LLM) extracts the required data types (e.g., campaign performance, client list) and any filters (client name, date range). <br>
-
-* Permission enforcement: AuthorizationService ensures the user has access to the requested clients (based on RBAC and client‑scope claims). If not, 403 is returned.<br>
-
-* Data retrieval: Service layer fetches data from PostgreSQL (with RLS) and Redis cache.<br>
-
-* Context builder formats the data into a standardised MCP JSON structure (includes metadata like source, timestamp).<br>
-
-* Audit logging: asynchronously logs the request (user, query, data accessed).<br>
-
-* Response is sent back to the AI Assistant, which then synthesises a natural language answer for the user.<br>
-
-All communication is over TLS 1.3, and rate limiting is applied to prevent abuse.<br>
-
-<img width="3849" height="2148" alt="deepseek_mermaid_20260706_3a35be" src="https://github.com/user-attachments/assets/799f30bc-ea3f-4250-84f4-ab6e241e7233" />
-
-
-
- #  RAG (Retrieval‑Augmented Generation)
- 
-We implement a RAG pipeline using Spring AI and Pinecone (or Redis Stack) as vector store . <br>
-
-# Architecture 
-
-Document Ingestion:  <br>
-
-Load SOPs, marketing docs, client briefs from S3.   <br>
-
-Chunk using TokenTextSplitter (chunk size 500 tokens, overlap 20%).  <br>
-
-Embed with OpenAiEmbeddingModel (or local model). <br>
-
-Store vectors + metadata (document type, version, client‑scope) in Pinecone. <br>
-
-Query Pipeline: <br>
-
-User question → embed → similarity search (top‑k=5). <br>
-
-Retrieve chunks and filter by user’s client scope (metadata filter).  <br>
-
-Build prompt: "Context: ...\nQuestion: ..."  <br> 
-
-Call LLM to generate answer with citations. <br>
-
-Chunking Strategy: Semantic chunking based on headings and paragraphs; overlapping to preserve context across boundaries. <br>
-
-Vector Database: Pinecone (managed, scalable) with index optimised for cosine similarity. <br>
-
-
-
-#  Automation
-
-We use a combination of Spring Integration (for core workflows) and n8n (for non‑critical automations).<br>
-
-Core Automations (implemented in Spring): <br>
-
-Campaign Launch: When campaign status changes to APPROVED, a Spring Integration flow pushes to Meta/Google, monitors launch, updates status, and sends notifications. <br>
-
-Performance Alerts: Scheduled job (every hour) checks ROAS/CPA thresholds; if breached, send Slack/email alerts. <br>
-
-Weekly Report Generation: Spring Batch job aggregates performance data, generates PDF, uploads to S3, and emails stakeholders. <br>
-
-Access Request Approval: State machine handles approval workflow with email notifications. <br>
-
-External Automations (via n8n webhooks): <br>
-
-Client onboarding: Send welcome emails, create Slack channels, schedule meetings.<br>
-
-Document management: Sync to Google Drive when new documents are uploaded.<br>
-
-Social media posting: Automate sharing of case studies. <br>
-
-All automations are event‑driven using Spring Cloud Stream with Kafka, ensuring decoupling and scalability.
-<br>
-
-#  Workflow Automation with n8n
-
-Automation: Campaign Launch Workflow   <br>
-Triggers: <br>
-  - Campaign status changes to 'approved' <br>
-  - Time-based schedule <br>
-
-Actions:  <br>
-  1. Validate campaign setup <br>
-  2. Push to Meta/Google<br>
-  3. Monitor launch status<br>
-  4. Send notifications<br>
-  5. Update internal systems<br>
-  6. Generate initial report<br>
-
-Workflow:<br>
-  - HTTP Request: Check campaign readiness <br>
-   - Switch: Platform (Meta/Google)<br>
-  - HTTP Request: Create campaign<br>
-  - Delay: Wait for approval<br>
-  - IF: Launch successful<br>
-    - Update database status<br>
-    - Send email notification<br>
-    - Generate first performance snapshot<br>
-  - ELSE:<br>
-    - Log error<br>
-    - Send alert<br>
-    - Update status to 'failed'<br>
-
-
-
-# README
-
- # Assumptions 
-
-Scale: Initial 100 clients, scalable to 1,000+  <br> 
-
-Data Volume: Millions of performance records<br>
-
-Users: 10-50 internal users, 100+ client users<br>
-
-Compliance: GDPR, CCPA, industry standards<br>
-
-Integration: Standard APIs for Meta, Google platforms <br>
-
-Budget: Mid-market SaaS budget for infrastructure <br>
-
-
-# Trade-offs 
-
-Relational Database vs NoSQL: PostgreSQL for ACID, Redis for caching <br>
-
-Monolith vs Microservices: Modular monolith initially, microservices later <br>
-
-Cloud vs On-Premise: AWS/GCP for scalability and managed services <br>
-
-Custom vs Off-the-Shelf: Custom solution for flexibility <br>
-
-Performance vs Cost: Optimize for cost-performance balance <br>
-
-# Future Improvements
-
-Advanced AI: Custom fine-tuned models for marketing <br>
-
-Real-time Processing: Streaming analytics with Kafka<br>
-
-Predictive Analytics: ML models for forecasting <br>
-
-Natural Language Interface: Full conversational agent <br>
-
-Multi-tenancy: Enhanced isolation and white-labeling <br>
-
-Automated Testing: Comprehensive test suite <br>
-
-Disaster Recovery: Multi-region deployment <br>
-
-Compliance Automation: Automated GDPR/CCPA tools <br>
-
-
-
-
-
-
-
-
-
-
-
-
+---
+
+## 3. SQL Queries with Explanations
+
+*All queries below are verified against the schema above — every referenced column now exists in its source table.*
+
+### 1. Pending Meta Access Requests
+```sql
+SELECT
+    ar.request_id,
+    c.company_name,
+    ar.asset_type,
+    ar.request_date,
+    ar.status
+FROM AccessRequests ar
+JOIN Clients c
+    ON ar.client_id = c.client_id
+WHERE ar.asset_type = 'META'
+  AND ar.status = 'PENDING'
+ORDER BY ar.request_date ASC;
+```
+**Explanation:** Retrieves all pending Meta Business access requests, joined with `Clients` to show the company name. Oldest requests appear first so the team can prioritize them.
+
+### 2. Overdue Campaigns
+```sql
+SELECT
+    campaign_id,
+    campaign_name,
+    end_date,
+    status
+FROM Campaigns
+WHERE end_date < CURRENT_DATE
+  AND status <> 'COMPLETED';
+```
+**Explanation:** Finds campaigns whose end date has already passed but haven't been marked completed. Useful for dashboard alerts.
+
+### 3. Team Workload
+```sql
+SELECT
+    tm.team_member_id,
+    tm.full_name,
+    COUNT(t.task_id) AS total_tasks
+FROM TeamMembers tm
+LEFT JOIN Tasks t
+    ON tm.team_member_id = t.assigned_to
+   AND t.status <> 'COMPLETED'
+GROUP BY tm.team_member_id, tm.full_name
+ORDER BY total_tasks DESC;
+```
+**Explanation:** Counts active (non-completed) tasks per employee. Helps managers distribute work evenly.
+
+### 4. Clients Missing GA4 or GTM Setup
+```sql
+SELECT
+    c.client_id,
+    c.company_name
+FROM Clients c
+LEFT JOIN GoogleAssets g
+    ON c.client_id = g.client_id
+WHERE g.ga4_property_id IS NULL
+   OR g.gtm_container_id IS NULL;
+```
+**Explanation:** Finds clients who haven't completed Google Analytics or Google Tag Manager setup. Useful during onboarding.
+
+### 5. Monthly Revenue
+```sql
+SELECT
+    YEAR(contract_start)  AS year,
+    MONTH(contract_start) AS month,
+    SUM(monthly_fee)      AS total_revenue
+FROM Clients
+WHERE status = 'ACTIVE'
+GROUP BY YEAR(contract_start), MONTH(contract_start)
+ORDER BY year DESC, month DESC;
+```
+**Explanation:** Calculates agency revenue from active client retainers, grouped by the month each contract started.
+
+### 6. Inactive Clients
+```sql
+SELECT
+    client_id,
+    company_name,
+    status
+FROM Clients
+WHERE status = 'INACTIVE';
+```
+**Explanation:** Lists all inactive clients — useful for retention/win-back campaigns.
+
+### 7. Highest Spend Campaigns
+```sql
+SELECT
+    campaign_id,
+    campaign_name,
+    platform,
+    spend
+FROM Campaigns
+ORDER BY spend DESC
+LIMIT 10;
+```
+**Explanation:** Returns the top 10 campaigns by ad spend — helps identify major campaigns to review closely.
+
+### 8. Total Campaign Spend per Client
+```sql
+SELECT
+    c.company_name,
+    SUM(cp.spend) AS total_spend
+FROM Clients c
+JOIN Projects p
+    ON c.client_id = p.client_id
+JOIN Campaigns cp
+    ON p.project_id = cp.project_id
+GROUP BY c.company_name
+ORDER BY total_spend DESC;
+```
+**Explanation:** Calculates total advertising spend per client across all their projects/campaigns. Useful for client billing reports.
+
+### 9. Campaign Performance
+```sql
+SELECT
+    campaign_name,
+    impressions,
+    clicks,
+    conversions,
+    spend
+FROM Campaigns
+ORDER BY conversions DESC;
+```
+**Explanation:** Shows core performance metrics per campaign, ranked by conversions — feeds dashboard analytics.
+
+### 10. Pending Tasks
+```sql
+SELECT
+    task_id,
+    title,
+    due_date,
+    status
+FROM Tasks
+WHERE status = 'PENDING'
+ORDER BY due_date;
+```
+**Explanation:** Displays pending tasks ordered by due date, helping marketing executives prioritize work.
+
+---
+
+## 4. Dashboards
+
+Dashboards are React frontends consuming REST APIs from Spring Boot.
+
+| Role | KPIs |
+|---|---|
+| **CEO** | Total revenue (trend), active client count, client churn, new clients, average revenue per client, team utilization, top 5 campaigns, client satisfaction score |
+| **Account Manager** | Portfolio size, revenue per client, client health scores, upcoming deliverables, pending approvals, task completion rate, meeting schedule |
+| **Marketing Executive** | Active campaigns, pending launches, daily spend, CPA trends, top creative performance, A/B test results, optimization suggestions, daily checklist |
+
+---
+
+## 5. API Design
+
+<img width="3850" height="1603" alt="api-design-diagram" src="https://github.com/user-attachments/assets/3669e70b-b2a0-4cd7-a09a-158e87746a43" />
+
+### Client Management
+```
+GET    /api/v1/clients
+GET    /api/v1/clients/{id}
+POST   /api/v1/clients
+PUT    /api/v1/clients/{id}
+DELETE /api/v1/clients/{id}
+GET    /api/v1/clients/{id}/campaigns
+```
+
+### Campaign Management
+```
+GET    /api/v1/campaigns
+GET    /api/v1/campaigns/{id}
+POST   /api/v1/campaigns
+PUT    /api/v1/campaigns/{id}
+PATCH  /api/v1/campaigns/{id}/status
+POST   /api/v1/campaigns/{id}/launch
+DELETE /api/v1/campaigns/{id}
+```
+
+### Asset Management
+```
+GET  /api/v1/assets/meta
+GET  /api/v1/assets/google
+POST /api/v1/assets/meta
+POST /api/v1/assets/google
+GET  /api/v1/assets/meta/{id}/performance
+```
+
+### Reporting
+```
+GET  /api/v1/reports
+POST /api/v1/reports/generate
+GET  /api/v1/reports/{id}
+GET  /api/v1/reports/{id}/download
+GET  /api/v1/dashboard/ceo
+GET  /api/v1/dashboard/manager
+GET  /api/v1/dashboard/executive
+```
+
+### Analytics
+```
+GET  /api/v1/analytics/campaign/{id}/metrics
+GET  /api/v1/analytics/roi
+GET  /api/v1/analytics/forecast
+POST /api/v1/analytics/optimization-suggestions
+```
+
+### AI Integration
+```
+POST /api/v1/ai/summarize
+POST /api/v1/ai/generate-report
+POST /api/v1/ai/optimization
+POST /api/v1/ai/ad-copy
+POST /api/v1/ai/analyze-performance
+```
+
+**Cross-cutting concerns:**
+- **AuthN/AuthZ:** OAuth2 + JWT, enforced via `@PreAuthorize` on service methods.
+- **Validation:** `@Valid` with Bean Validation 2.0.
+- **Logging:** MDC for request tracing; structured JSON logs shipped to ELK.
+- **Rate Limiting:** Resilience4j `RateLimiter`, backed by Redis for distributed limits.
+- **Error Handling:** Global `@ControllerAdvice` returning standardized error responses.
+
+---
+
+## 6. AI Integration
+
+<img width="2611" height="1432" alt="ai-integration-diagram" src="https://github.com/user-attachments/assets/7578a415-1cf8-450c-95ac-47b09fd2c23d" />
+
+We use **Spring AI** to provide a unified abstraction over multiple LLM providers (OpenAI, Anthropic, Azure OpenAI) and embedding models.
+
+**Use cases:**
+- **Meeting Summarization** — `ChatClient` call with a prompt to extract action items and decisions from transcripts.
+- **Report Generation** — combines performance data (passed as structured JSON in the prompt) with natural-language insights.
+- **Optimization Recommendations** — feeds campaign metrics to the LLM and requests bid adjustments, audience refinements, etc.
+- **Ad Copy Creation** — `PromptTemplate` with product/audience variables to generate copy variations.
+- **Campaign Performance Analysis** — detects trends, anomalies, and benchmark deviations automatically.
+
+All AI calls are asynchronous (`@Async` / reactive) for long-running tasks, with retry and fallback strategies via Resilience4j.
+
+---
+
+## 7. MCP (Model Context Protocol)
+
+> MCP is a **JSON-RPC 2.0 based protocol**, not a single natural-language `/context` REST endpoint. An MCP **server** exposes discrete, typed primitives — **tools**, **resources**, and **prompts** — that any MCP-compatible client (e.g., Claude, an internal agent) can discover (`tools/list`) and invoke (`tools/call`) directly. The client — not a custom "intent parser" — decides which tool to call and with what arguments, based on the user's natural-language request. This section is corrected to reflect the real spec, and is grounded in the same MCP-over-n8n integration used in the automation section below.
+
+### MCP vs REST
+
+| Aspect | REST API | MCP |
+|---|---|---|
+| Purpose | CRUD operations, frontend data | Structured tool/resource access for AI agents |
+| Transport | HTTP verbs on multiple resource paths | JSON-RPC 2.0 over stdio or HTTP/SSE |
+| Discovery | API docs / OpenAPI spec (static) | `tools/list`, `resources/list` (dynamic, self-describing) |
+| Invocation | Client picks the endpoint | LLM client picks the tool at runtime based on tool descriptions |
+| Response format | Entity DTOs | Structured `tool_result` content blocks (text/JSON) consumable by an LLM |
+| Security | OAuth2 scopes, RBAC | Same — enforced inside each tool's implementation |
+| Use cases | UI interactions, service-to-service integration | AI agents, RAG orchestration, automated insight generation |
+
+### Our MCP Server Design
+
+We expose an **MCP server** as a thin layer over our existing Spring Boot services. Each tool wraps one governed capability rather than one raw database table:
+
+- `get_campaign_performance(client_id, date_range)`
+- `get_client_list(status_filter)`
+- `get_pending_access_requests(asset_type)`
+- `generate_optimization_suggestions(campaign_id)`
+
+**Secure request flow:**
+1. An MCP client (e.g., an internal support agent, or Claude via our MCP server) sends a `tools/call` request with a JWT in the connection's auth context.
+2. Our MCP server's transport layer validates the JWT via Spring Security's OAuth2 resource server support.
+3. The invoked tool's handler calls `AuthorizationService`, which checks the caller's RBAC role and client-scope claims before touching any data. Unauthorized calls return a `tool_result` error, not raw data.
+4. The service layer fetches data from PostgreSQL (with Row-Level Security) and Redis cache, exactly as the REST APIs do — tools reuse the same service layer, they don't duplicate logic.
+5. The handler formats the result as an MCP `tool_result` content block (JSON), including metadata such as source and timestamp.
+6. The call is logged asynchronously to `AUDIT_LOGS` (user, tool name, arguments, data scope accessed).
+7. The MCP client receives the structured result and synthesizes a natural-language answer for its user.
+
+All traffic runs over TLS 1.3, with rate limiting applied per client to prevent abuse — identical security posture to the REST APIs, just a different transport and invocation model.
+
+<img width="3849" height="2148" alt="mcp-flow-diagram" src="https://github.com/user-attachments/assets/799f30bc-ea3f-4250-84f4-ab6e241e7233" />
+
+---
+
+## 8. RAG (Retrieval-Augmented Generation)
+
+We implement a RAG pipeline using **Spring AI** with **Pinecone** (or Redis Stack) as the vector store.
+
+### Document Ingestion
+1. Load SOPs, marketing docs, and client briefs from S3.
+2. Chunk using `TokenTextSplitter` (chunk size 500 tokens, 20% overlap) — semantic chunking based on headings/paragraphs, with overlap preserved to avoid losing context across boundaries.
+3. Embed using `OpenAiEmbeddingModel` (or a local embedding model for cost control).
+4. Store vectors + metadata (document type, version, client-scope tag) in Pinecone.
+
+### Query Pipeline
+1. User question → embed → similarity search (top-k = 5).
+2. Retrieve matching chunks, filtered by the requesting user's client scope (metadata filter) — this is the RLS-equivalent for unstructured data.
+3. Build the prompt: `Context: {retrieved_chunks}\nQuestion: {user_question}`.
+4. Call the LLM to generate an answer, with citations back to source documents.
+
+**Vector database:** Pinecone (managed, scalable), index optimized for cosine similarity.
+
+---
+
+## 9. Automation
+
+We use **Spring Integration** for core, business-critical workflows, and **n8n** for non-critical/external automations — decoupled from each other for reliability.
+
+### Core Automations (Spring Integration / Spring Batch)
+- **Campaign Launch** — on status change to `APPROVED`, a Spring Integration flow pushes the campaign to Meta/Google, monitors launch status, updates the DB, and sends notifications.
+- **Performance Alerts** — a scheduled job (hourly) checks ROAS/CPA thresholds; breaches trigger Slack/email alerts.
+- **Weekly Report Generation** — a Spring Batch job aggregates performance data, generates a PDF, uploads to S3, and emails stakeholders.
+- **Access Request Approval** — a state machine drives the approval workflow with email notifications at each transition.
+
+### External Automations (n8n, via webhooks/MCP)
+- **Client Onboarding** — sends welcome emails, creates Slack channels, schedules kickoff meetings.
+- **Document Management** — syncs newly uploaded documents to Google Drive.
+- **Social Media Posting** — automates sharing of case studies.
+
+All automations are event-driven via **Spring Cloud Stream + Kafka**, keeping producers and consumers decoupled and independently scalable.
+
+### n8n Workflow: Campaign Launch
+
+**Triggers:**
+- Campaign status changes to `approved`
+- Time-based schedule (fallback check)
+
+**Actions:**
+1. Validate campaign setup
+2. Push to Meta/Google
+3. Monitor launch status
+4. Send notifications
+5. Update internal systems
+6. Generate initial performance snapshot
+
+**Workflow nodes:**
+```
+HTTP Request  → Check campaign readiness
+Switch        → Platform (Meta / Google)
+HTTP Request  → Create campaign
+Delay         → Wait for platform approval
+IF Launch successful:
+    → Update database status
+    → Send email notification
+    → Generate first performance snapshot
+ELSE:
+    → Log error
+    → Send alert
+    → Update status to 'failed'
+```
+
+---
+
+## 10. Assumptions
+
+- **Scale:** Initial 100 clients, scalable to 1,000+.
+- **Data Volume:** Millions of performance records.
+- **Users:** 10–50 internal users, 100+ client users.
+- **Compliance:** GDPR, CCPA, and general industry data-handling standards.
+- **Integrations:** Standard public APIs for Meta and Google platforms.
+- **Budget:** Mid-market SaaS infrastructure budget.
+
+## 11. Trade-offs
+
+| Decision | Choice & Reasoning |
+|---|---|
+| Relational vs NoSQL | PostgreSQL for ACID guarantees on core business data; Redis for caching/session state |
+| Monolith vs Microservices | Modular monolith initially (faster to build, easier to reason about at 100 clients); split into microservices once team/scale justifies the operational overhead |
+| Cloud vs On-Premise | AWS/GCP — managed services reduce ops burden and support elastic scaling |
+| Custom vs Off-the-Shelf | Custom build — agency-specific workflows (multi-platform asset management, client-scoped RAG) don't map cleanly to generic tools |
+| Performance vs Cost | Tuned for cost-performance balance appropriate to a mid-market SaaS budget, not maximum throughput |
+
+## 12. Future Improvements
+
+- Custom fine-tuned models for marketing-specific language and recommendations.
+- Real-time streaming analytics with Kafka (beyond the current batch/hourly checks).
+- Predictive analytics (ML forecasting for spend/ROAS).
+- Full conversational natural-language interface over the MCP server.
+- Enhanced multi-tenancy and white-labeling.
+- Comprehensive automated test suite (unit, integration, contract tests).
+- Multi-region deployment for disaster recovery.
+- Automated GDPR/CCPA compliance tooling (data subject access requests, retention policies).
